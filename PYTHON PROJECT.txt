@@ -1,0 +1,343 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+from datetime import date
+
+# Database
+db = sqlite3.connect("fuel.db")
+cur = db.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS fuel(
+    id INTEGER PRIMARY KEY,
+    date TEXT,
+    vehicle TEXT,
+    km REAL,
+    litres REAL,
+    price REAL,
+    cost REAL
+)
+""")
+db.commit()
+
+
+# Functions
+def calculate():
+    try:
+        cost = float(litres.get()) * float(price.get())
+        cost_var.set("₹" + str(round(cost, 2)))
+    except:
+        messagebox.showerror("Error", "Enter valid numbers")
+
+
+def save():
+    try:
+        d = date_var.get()
+        v = vehicle.get()
+        k = float(km.get())
+        l = float(litres.get())
+        p = float(price.get())
+
+        if d == "" or v == "" or k < 0 or l <= 0 or p <= 0:
+            raise ValueError
+
+        cur.execute(
+            "INSERT INTO fuel(date,vehicle,km,litres,price,cost) VALUES(?,?,?,?,?,?)",
+            (d, v, k, l, p, l * p)
+        )
+        db.commit()
+
+        messagebox.showinfo("Saved", "Fuel entry saved")
+        clear()
+        show_records()
+        summary()
+
+    except:
+        messagebox.showerror("Error", "Enter valid details")
+
+
+def clear():
+    date_var.set(str(date.today()))
+    vehicle.set("")
+    km.set("")
+    litres.set("")
+    price.set("")
+    cost_var.set("₹0.00")
+
+
+def show_records():
+    for x in table.get_children():
+        table.delete(x)
+
+    cur.execute("SELECT * FROM fuel ORDER BY id DESC")
+
+    for r in cur.fetchall():
+        table.insert("", "end", values=r)
+
+
+def delete():
+    selected = table.selection()
+
+    if not selected:
+        messagebox.showwarning("Delete", "Select a record")
+        return
+
+    for x in selected:
+        rid = table.item(x)["values"][0]
+        cur.execute("DELETE FROM fuel WHERE id=?", (rid,))
+
+    db.commit()
+    show_records()
+    summary()
+
+
+def summary():
+    # Total expense and fuel
+    cur.execute("SELECT SUM(cost), SUM(litres) FROM fuel")
+    total, fuel = cur.fetchone()
+
+    total = total or 0
+    fuel = fuel or 0
+
+    expense.set("₹" + format(total, ".2f"))
+    total_fuel.set(format(fuel, ".2f") + " L")
+
+    # Mileage calculation
+    cur.execute(
+        "SELECT vehicle, km, litres FROM fuel ORDER BY vehicle, id"
+    )
+
+    rows = cur.fetchall()
+
+    mileages = []
+    total_distance = 0
+    previous = {}
+
+    for v, k, l in rows:
+        if v in previous:
+            distance = k - previous[v]
+
+            if distance > 0:
+                mileages.append(distance / l)
+                total_distance += distance
+
+        previous[v] = k
+
+    # Average Mileage
+    if mileages:
+        avg = sum(mileages) / len(mileages)
+        mileage.set(format(avg, ".2f") + " km/L")
+    else:
+        mileage.set("0.00 km/L")
+
+    # Average Cost per KM
+    if total_distance > 0:
+        average_cost_km = total / total_distance
+        costkm.set("₹" + format(average_cost_km, ".2f") + "/km")
+    else:
+        costkm.set("₹0.00/km")
+
+
+# Main Window
+root = tk.Tk()
+root.title("IndianOil Fuel Expense & Vehicle Mileage Tracker")
+root.geometry("1050x650")
+
+
+# Variables
+date_var = tk.StringVar(value=str(date.today()))
+vehicle = tk.StringVar()
+km = tk.StringVar()
+litres = tk.StringVar()
+price = tk.StringVar()
+cost_var = tk.StringVar(value="₹0.00")
+
+expense = tk.StringVar(value="₹0.00")
+total_fuel = tk.StringVar(value="0.00 L")
+mileage = tk.StringVar(value="0.00 km/L")
+costkm = tk.StringVar(value="₹0.00/km")
+
+
+# Title
+tk.Label(
+    root,
+    text="IndianOil Fuel Expense & Vehicle Mileage Tracker",
+    font=("Arial", 20, "bold")
+).pack(pady=15)
+
+
+# Summary
+frame = tk.Frame(root)
+frame.pack(fill="x", padx=15)
+
+for i, (name, var) in enumerate([
+    ("Total Fuel Expense", expense),
+    ("Total Fuel", total_fuel),
+    ("Average Mileage", mileage),
+    ("Average Cost/km", costkm)
+]):
+    box = tk.LabelFrame(frame, text=name, padx=25, pady=10)
+    box.grid(row=0, column=i, padx=5, sticky="ew")
+
+    tk.Label(
+        box,
+        textvariable=var,
+        font=("Arial", 14, "bold")
+    ).pack()
+
+
+# Tabs
+tabs = ttk.Notebook(root)
+tabs.pack(fill="both", expand=True, padx=15, pady=10)
+
+entry_tab = tk.Frame(tabs)
+record_tab = tk.Frame(tabs)
+analytics_tab = tk.Frame(tabs)
+
+tabs.add(entry_tab, text=" Add Fuel Entry ")
+tabs.add(record_tab, text=" Records ")
+tabs.add(analytics_tab, text=" Analytics ")
+
+
+# Entry Form
+form = tk.LabelFrame(
+    entry_tab,
+    text="Fuel Purchase Details",
+    padx=20,
+    pady=20
+)
+form.pack(fill="x", padx=20, pady=20)
+
+
+fields = [
+    ("Date", date_var),
+    ("Vehicle Number", vehicle),
+    ("Odometer (km)", km),
+    ("Fuel (litres)", litres),
+    ("Price per litre (₹)", price)
+]
+
+for i, (text, var) in enumerate(fields):
+    r = i // 2
+    c = (i % 2) * 2
+
+    tk.Label(
+        form,
+        text=text
+    ).grid(row=r, column=c, padx=10, pady=10)
+
+    tk.Entry(
+        form,
+        textvariable=var,
+        width=25
+    ).grid(row=r, column=c + 1, padx=10)
+
+
+tk.Label(
+    form,
+    text="Calculated Cost"
+).grid(row=3, column=0, padx=10, pady=10)
+
+tk.Label(
+    form,
+    textvariable=cost_var,
+    font=("Arial", 11, "bold")
+).grid(row=3, column=1)
+
+tk.Button(
+    form,
+    text="Calculate Cost",
+    command=calculate
+).grid(row=3, column=2)
+
+
+tk.Button(
+    entry_tab,
+    text="Save Fuel Entry",
+    command=save
+).pack(side="left", padx=30)
+
+tk.Button(
+    entry_tab,
+    text="Clear Form",
+    command=clear
+).pack(side="left")
+
+
+# Records
+buttons = tk.Frame(record_tab)
+buttons.pack(fill="x", pady=10)
+
+tk.Button(
+    buttons,
+    text="Refresh",
+    command=show_records
+).pack(side="left", padx=10)
+
+tk.Button(
+    buttons,
+    text="Delete Selected",
+    command=delete
+).pack(side="right", padx=10)
+
+
+columns = (
+    "ID", "Date", "Vehicle",
+    "KM", "Litres", "₹/L", "Total ₹"
+)
+
+table = ttk.Treeview(
+    record_tab,
+    columns=columns,
+    show="headings"
+)
+
+for c in columns:
+    table.heading(c, text=c)
+    table.column(c, width=120)
+
+table.pack(
+    fill="both",
+    expand=True,
+    padx=10,
+    pady=10
+)
+
+
+# Analytics
+tk.Label(
+    analytics_tab,
+    text="FUEL ANALYTICS",
+    font=("Arial", 18, "bold")
+).pack(pady=30)
+
+tk.Label(
+    analytics_tab,
+    textvariable=expense,
+    font=("Arial", 14)
+).pack(pady=5)
+
+tk.Label(
+    analytics_tab,
+    textvariable=total_fuel,
+    font=("Arial", 14)
+).pack(pady=5)
+
+tk.Label(
+    analytics_tab,
+    textvariable=mileage,
+    font=("Arial", 14)
+).pack(pady=5)
+
+tk.Label(
+    analytics_tab,
+    textvariable=costkm,
+    font=("Arial", 14)
+).pack(pady=5)
+
+
+# Start
+show_records()
+summary()
+
+root.mainloop()
